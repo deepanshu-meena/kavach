@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kavach - Environmental Safety Copilot</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --ink:#eef0f4; --mut:#9aa3b2; --acc:#ff6b4a; --ok:#2ea36b; --warn:#d99a2b; --danger:#e0453c; --line:#262b35; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); line-height:1.5; }
+  header { padding: 18px 20px 8px; }
+  h1 { margin:.1em 0; font-size: 1.5rem; } .sub { color:var(--mut); margin-top:0; font-size:.92rem; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 60px; display:grid; gap:16px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { main { grid-template-columns: 1fr 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .wide { grid-column: 1 / -1; }
+  select, button { padding:9px 12px; border-radius:9px; border:1px solid var(--line); background:#1d212b; color:var(--ink); font:inherit; }
+  button { background:var(--acc); border:0; color:#fff; font-weight:700; cursor:pointer; }
+  button:hover { filter: brightness(1.08); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  #map { height: 320px; border-radius: 10px; margin-top: 10px; }
+  .stat { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--line); font-size:.95rem; }
+  .stat:last-child { border-bottom:0; }
+  .badge { padding:2px 10px; border-radius:99px; font-size:.75rem; font-weight:700; text-transform:uppercase; }
+  .low, .safe { background:var(--ok); } .moderate, .caution { background:var(--warn); color:#1a1a1a; }
+  .high, .warning { background:#d9632b; } .severe, .danger { background:var(--danger); }
+  #alert-banner { display:none; background:var(--danger); color:#fff; padding:12px 16px; border-radius:10px; font-weight:700; margin-bottom:12px; }
+  .mut { color:var(--mut); font-size:.88rem; }
+  table { width:100%; border-collapse: collapse; font-size:.85rem; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  .recommended { outline: 2px solid var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ Kavach</h1>
+  <p class="sub">An environmental safety copilot for Delhi's outdoor workers -- real exposure, not just an AQI number.</p>
+</header>
+<main>
+  <div id="alert-banner" class="wide"></div>
+
+  <section class="card">
+    <h3>Worker risk dashboard</h3>
+    <div class="row">
+      <select id="persona"></select>
+      <select id="locality">
+        <option value="rohini">Rohini</option>
+        <option value="bawana">Bawana</option>
+        <option value="connaught-place">Connaught Place</option>
+      </select>
+      <button id="refresh">Check current risk</button>
+    </div>
+    <div id="risk-out" style="margin-top:12px;"></div>
+  </section>
+
+  <section class="card">
+    <h3>Simulate a full shift</h3>
+    <p class="mut">Runs an accelerated workday (same shape of API the demo video uses).</p>
+    <button id="simulate">Run simulation</button>
+    <div id="sim-out" style="margin-top:12px;"></div>
+  </section>
+
+  <section class="card wide">
+    <h3>Route comparison (demo corridor)</h3>
+    <p class="mut">Lowest combined pollution + heat exposure, not just the shortest path.</p>
+    <div id="map"></div>
+    <div id="route-out" style="margin-top:12px;"></div>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function loadPersonas() {
+  const res = await fetch("/api/personas");
+  const data = await res.json();
+  $("#persona").innerHTML = Object.entries(data).map(([id, p]) =>
+    `<option value="${id}">${esc(p.name)} - ${esc(p.role)}</option>`).join("");
+}
+
+function badge(cls, text) { return `<span class="badge ${esc(cls)}">${esc(text)}</span>`; }
+
+async function checkRisk() {
+  const persona_id = $("#persona").value, locality = $("#locality").value;
+  const res = await fetch(`/api/risk/current?persona_id=${persona_id}&locality=${locality}`);
+  const d = await res.json();
+  $("#risk-out").innerHTML = `
+    <div class="stat"><span>Ambient PM2.5</span><span>${d.snapshot.pm25} ug/m3</span></div>
+    <div class="stat"><span>Pollution dose</span><span>${d.pollution.cigarette_equivalent} cigarette-equiv ${badge(d.pollution.risk, d.pollution.risk)}</span></div>
+    <div class="stat"><span>Heat index</span><span>${d.heat.heat_index_celsius}C ${badge(d.heat.risk, d.heat.risk)}</span></div>
+    <div class="stat"><span>Fire signal</span><span>${d.snapshot.fire_signal.upwind_fire_count_24h} upwind detections</span></div>
+    <p style="margin-top:10px;">${esc(d.explanation.text)}</p>
+    <p class="mut">explanation source: ${esc(d.explanation.source)}</p>`;
+  if (d.heat.take_cover) {
+    $("#alert-banner").style.display = "block";
+    $("#alert-banner").textContent = `TAKE COVER NOW -- ${d.persona.name}'s heat risk is "${d.heat.risk}".`;
+  }
+}
+
+async function runSimulation() {
+  const persona_id = $("#persona").value, locality = $("#locality").value;
+  $("#sim-out").textContent = "Running...";
+  const res = await fetch(`/api/simulate/workday?persona_id=${persona_id}&locality=${locality}`);
+  const d = await res.json();
+  const rows = d.timeline.map(t =>
+    `<tr><td>${t.hour}:00</td><td>${t.pm25}</td><td>${t.cumulative_cigarette_equivalent}</td>
+     <td>${badge(t.dose_risk, t.dose_risk)}</td><td>${badge(t.heat_risk, t.heat_risk)}</td>
+     <td>${t.alert_fired_this_step ? "🔔 alert" : ""}</td></tr>`).join("");
+  $("#sim-out").innerHTML = `
+    <p><b>${esc(d.persona_name)}</b> total exposure by end of shift:
+       <b>${d.total_cigarette_equivalent} cigarette-equivalents</b></p>
+    <table><thead><tr><th>Hour</th><th>PM2.5</th><th>Cumulative</th><th>Pollution</th><th>Heat</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+  const alertStep = d.timeline.find(t => t.alert_fired_this_step);
+  if (alertStep) {
+    $("#alert-banner").style.display = "block";
+    $("#alert-banner").textContent = `TAKE COVER NOW -- triggered at hour ${alertStep.hour}:00 for ${d.persona_name}.`;
+  }
+}
+
+let map, layer;
+async function loadRoutes() {
+  const res = await fetch("/api/route/compare");
+  const d = await res.json();
+  if (!map) {
+    map = L.map("map").setView([28.73, 77.08], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap" }).addTo(map);
+  }
+  const rows = d.routes.map(r => `
+    <tr class="${r.id === d.recommended_route_id ? 'recommended' : ''}">
+      <td>${esc(r.label)}${r.id === d.recommended_route_id ? " ✅" : ""}</td>
+      <td>${r.length_km} km</td><td>${r.estimated_minutes} min</td>
+      <td>${r.avg_pm25}</td><td>${r.avg_heat_index_celsius}C</td><td>${r.exposure_cost}</td>
+    </tr>`).join("");
+  $("#route-out").innerHTML = `
+    <table><thead><tr><th>Route</th><th>Length</th><th>ETA</th><th>Avg PM2.5</th><th>Avg heat</th><th>Exposure cost</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+$("#refresh").onclick = checkRisk;
+$("#simulate").onclick = runSimulation;
+loadPersonas().then(checkRisk);
+loadRoutes();
+</script>
+</body>
+</html>

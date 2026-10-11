@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "note": "Offline fallback data, used when live APIs are unreachable (no network, no API key configured, or the demo is run without internet). Values are representative of real Oct-Nov Delhi readings, not live.",
+    "as_of": "2026-10-02"
+  },
+  "localities": {
+    "rohini": { "pm25": 412, "temp_celsius": 31, "relative_humidity_pct": 48 },
+    "bawana": { "pm25": 455, "temp_celsius": 32, "relative_humidity_pct": 44 },
+    "connaught-place": { "pm25": 298, "temp_celsius": 30, "relative_humidity_pct": 52 }
+  },
+  "fire_signal": {
+    "upwind_fire_count_24h": 187,
+    "forecast_note": "High stubble-burning activity detected upwind (Punjab/Haryana); AQI likely to worsen over next 12-24h."
+  }
+}
