@@ -1,12 +1,13 @@
-# 🛡️ Kavach — An Environmental Safety Copilot for Delhi's Outdoor Workers
+# 🛡️ Kavach — Environmental Safety Copilot for Delhi's Outdoor Workers
 
-> Built for **Environmental Hacks**, Event 02 of the Bharat Builds Tour (WeMakeDevs × AWS), Air track.
+> Built for **Environmental Hacks**, Event 02 of the Bharat Builds Tour (WeMakeDevs × AWS), **Air track**.
 >
-> **Status: core engine built and tested locally (25 tests passing); not yet deployed to AWS.**
-> The risk engine, route comparison, simulation, API and dashboard all run today with real
-> calculations and offline-safe fallbacks. What's left is deploying `template.yaml` to AWS, wiring a
-> live Bedrock model, and recording the demo video. See `BLUEPRINT.md` section 15 for the live status
-> checklist and `DECISIONS.md` for why it's built this way.
+> **Status: core engine built and tested locally (25 tests passing), submitted as a Build-track entry
+> — no AWS account used, no deployed URL.** Everything below runs with zero AWS setup and zero API
+> keys; every live data source falls back to realistic offline sample data. See `DECISIONS.md` for why
+> it's built this way and `BLUEPRINT.md` for the full technical spec and status checklist.
+>
+> 🎥 **Demo video:** https://youtu.be/rEcifdrzgIw
 
 ## The problem
 
@@ -20,11 +21,18 @@ stress is dangerous. A citywide AQI number or a temperature reading doesn't tell
 - **Pollution exposure dose** — turns ambient PM2.5 and how hard someone is working into an actual
   inhaled dose, shown as cigarette-equivalents, not a number nobody acts on.
 - **"Take cover now" heat-stroke warning** — a WBGT-approximate heat-stress index from temperature,
-  humidity and exertion level, with the nearest shaded point when it crosses a danger threshold.
+  humidity and exertion level, with an automatic alert when it crosses a danger threshold.
 - **Route comparison** — scores route options by cumulative heat + pollution exposure, not just
-  distance, and shows the trade-off plainly (e.g. 3 minutes longer for 120 fewer AQI-minutes).
+  distance, and shows the trade-off plainly (e.g. a few minutes longer for a much cleaner route).
 
-An agent (Amazon Bedrock) fuses all three signals and decides when to alert, and explains why.
+An agent (Amazon Bedrock, via boto3's Converse API) explains the fused risk signals in plain language —
+with a deterministic offline fallback so the safety alerts never depend on an AI being reachable.
+
+**Future scope:** the route-comparison engine is designed to generalize beyond the fixed demo corridor —
+it could plug into delivery platforms like Zomato/Swiggy to route riders around their lowest-exposure
+path for a shift, or into Google Maps as a "healthiest route" layer alongside fastest/shortest, the way
+Maps already offers eco-friendly routing. The underlying exposure-dose engine would also work as a
+backend service these platforms could query directly, rather than a rider-facing app alone.
 
 ## How it works
 
@@ -32,10 +40,10 @@ An agent (Amazon Bedrock) fuses all three signals and decides when to alert, and
 flowchart LR
     CPCB[CPCB / OpenAQ] --> L1[Lambda: ingest]
     FIRMS[NASA FIRMS] --> L1
-    WX[Weather API] --> L1
+    WX[Open-Meteo weather] --> L1
     L1 --> DB[(DynamoDB)]
     DB --> AGENT[Bedrock Agent]
-    UI[Amplify web UI] --> APIGW[API Gateway] --> AGENT
+    UI[FastAPI + dashboard] --> APIGW[API Gateway] --> AGENT
     AGENT --> SNS[SNS alerts] --> Worker[Worker / dispatcher]
     AGENT --> APIGW --> UI
 ```
@@ -44,21 +52,23 @@ Full architecture, data sources, and the exposure/heat-index math are in `BLUEPR
 
 ## Tech stack
 
-- **Compute:** AWS Lambda (ingestion, risk calculation, route scoring)
-- **Data:** Amazon DynamoDB
-- **AI:** Amazon Bedrock (agent fusing heat + pollution + route signals)
-- **API:** Amazon API Gateway
-- **Alerts:** Amazon SNS
-- **Frontend hosting:** AWS Amplify Hosting
-- **Data sources:** CPCB/OpenAQ (live AQI), NASA FIRMS (stubble-burning fire detections), a weather API
-  (temperature/humidity)
+- **Compute:** AWS Lambda (ingestion, risk calculation, route scoring) via Mangum, wrapping one FastAPI app
+- **Data:** Amazon DynamoDB (schema defined, deploy-ready)
+- **AI:** Amazon Bedrock (agent fusing heat + pollution + route signals), with a deterministic offline
+  fallback when Bedrock isn't configured
+- **API:** Amazon API Gateway (via AWS SAM)
+- **Alerts:** Amazon SNS (topic defined, publish call pending — see `BLUEPRINT.md` status)
+- **Infra as code:** AWS SAM (`template.yaml`) — Lambda, API Gateway, DynamoDB, SNS, all defined and
+  ready for `sam deploy`, built and tested entirely on the no-AWS-account Build track path
+- **Data sources:** CPCB/OpenAQ (live AQI), NASA FIRMS (stubble-burning fire detections), Open-Meteo
+  (temperature/humidity) — each with a documented offline fallback
 
 ## Quick start
 
 Requires Python 3.10+.
 
 ```bash
-git clone https://github.com/<username>/kavach.git
+git clone https://github.com/<your-username>/kavach.git
 cd kavach
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -77,38 +87,41 @@ cp .env.example .env
 # edit .env: add OPENAQ_API_KEY, FIRMS_MAP_KEY, and AWS credentials for Bedrock
 ```
 
-## Deploy to AWS
+## Deploy to AWS (optional — not used for this submission)
 
 ```bash
 pip install aws-sam-cli
 sam build && sam deploy --guided
 ```
 Deploys the API (Lambda + HTTP API, via Mangum wrapping the same FastAPI app), the scheduled ingest
-Lambda, a DynamoDB table, and an SNS topic for alerts. See `template.yaml`.
-
-## Live demo 🚧
-
-- Deployed URL: _add after `sam deploy`_
-- Demo video: _add once recorded_
+Lambda, a DynamoDB table, and an SNS topic. See `template.yaml`. This submission was built and tested
+entirely on the Build track's no-AWS-account path, so this step was not run for the hackathon deadline.
 
 ## Who this is for
 
-Three personas used throughout the design and demo: **Rohan** (food-delivery rider), **Constable
-Singh** (Delhi traffic police), **Mahesh** (construction labourer). See `BLUEPRINT.md` section 4.
+Three named personas used throughout the design, dashboard and demo video: **Rohan** (food-delivery
+rider), **Constable Singh** (Delhi traffic police), **Mahesh** (construction labourer). See
+`BLUEPRINT.md` section 4.
 
-## Limitations (honest, as of planning stage)
+## Limitations (honest)
 
-- The route-comparison feature uses a **fixed demo corridor** (2–3 real roads), not citywide live
-  routing — a deliberate scope decision for a 4-day build, explained in `DECISIONS.md`.
-- The heat-stress index is a **WBGT approximation** from temperature and humidity, not a full WBGT
-  sensor reading (globe/wet-bulb temperature) — explained in `DECISIONS.md`.
-- Scheme/data accuracy depends on CPCB/OpenAQ and NASA FIRMS uptime; this is a hackathon prototype,
-  not a safety-certified product.
+- **No AWS deployment for this submission** — built and tested entirely on the Build track's
+  no-AWS-account path. `template.yaml` is written and ready, but `sam deploy` has not been run.
+- The route-comparison feature uses a **fixed demo corridor** (3 real roads near DTU), not citywide
+  live routing — a deliberate scope decision for a short build window, explained in `DECISIONS.md`.
+- The heat-stress index is a **WBGT approximation** from temperature and humidity (NOAA heat-index
+  regression + an exertion adjustment), not a full WBGT sensor reading — explained in `DECISIONS.md`.
+- The explanation layer uses Amazon Bedrock when credentials are available; otherwise it falls back to
+  a deterministic template so the safety logic never breaks — the dashboard labels which one produced
+  a given explanation.
+- This is a hackathon prototype relying on public data sources (CPCB/OpenAQ, NASA FIRMS), not a
+  safety-certified product.
 
 ## Roadmap
 
-Expand beyond the fixed corridor to full city routing, add more personas, add a physical PM2.5 sensor
-for real hardware validation, and pilot with an actual rider fleet or municipal body.
+Deploy to AWS, expand beyond the fixed corridor to full city routing, add more personas, add a
+physical PM2.5 sensor for real hardware validation, and pilot with an actual rider fleet, delivery
+platform, or municipal body.
 
 ## License
 
